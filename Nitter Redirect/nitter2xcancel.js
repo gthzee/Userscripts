@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Nitter.net Auto-Redirect
-// @version      1.3
+// @version      1.4
 // @description  Redirect to xcancel.com when Nitter shows rate limit error
 // @author       gthzee
 // @match        *://nitter.net/*
@@ -10,39 +10,51 @@
 (function() {
     'use strict';
 
-    // Pesan error yang dicari (dalam berbagai variasi)
-    const errorMessages = [
-        "Instance has no auth tokens, or is fully rate limited",
-        "rate limited",
+    // Variasi pesan error yang mungkin
+    const errorPatterns = [
         "no auth tokens",
-        "try again later"
+        "rate limited",
+        "try again later",
+        "instance overloaded"
     ];
 
-    // Fungsi untuk memeriksa error
-    function checkForError() {
-        const pageText = document.body.innerText.toLowerCase();
+    function shouldRedirect() {
+        const bodyText = document.body?.innerText?.toLowerCase() || '';
+        return errorPatterns.some(pattern => bodyText.includes(pattern));
+    }
 
-        // Cek semua variasi pesan error
-        const hasError = errorMessages.some(msg =>
-            pageText.includes(msg.toLowerCase())
-        );
+    function performRedirect() {
+        const destination = `https://xcancel.com${window.location.pathname}${window.location.search}${window.location.hash}`;
+        window.location.replace(destination);
+    }
 
-        if (hasError) {
-            const newUrl = `https://xcancel.com${window.location.pathname}${window.location.search}${window.location.hash}`;
-
-            // Gunakan replace untuk menghindari history
-            console.log('Redirecting to:', newUrl);
-            window.location.replace(newUrl);
+    function init() {
+        if (shouldRedirect()) {
+            performRedirect();
         }
     }
 
-    // Jalankan segera setelah DOM siap
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', checkForError);
-    } else {
-        checkForError();
-    }
+    // Jalankan segera untuk konten yang sudah load
+    init();
 
-    // Jalankan lagi dengan delay untuk tangkap konten async
-    setTimeout(checkForError, 2000);
+    // Tambahkan observer untuk handle konten dynamic
+    const observer = new MutationObserver(() => {
+        if (shouldRedirect()) {
+            observer.disconnect();
+            performRedirect();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    // Fallback timeout
+    setTimeout(() => {
+        if (shouldRedirect()) {
+            performRedirect();
+        }
+    }, 3000);
 })();
