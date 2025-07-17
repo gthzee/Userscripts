@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Nitter.net Auto-Redirect
-// @version      1.4
+// @version      1.6
 // @description  Redirect to xcancel.com when Nitter shows rate limit error
 // @author       gthzee
 // @match        *://nitter.net/*
@@ -10,7 +10,6 @@
 (function() {
     'use strict';
 
-    // Variasi pesan error
     const errorPatterns = [
         "no auth tokens",
         "rate limited",
@@ -18,43 +17,47 @@
         "instance overloaded"
     ];
 
-    function shouldRedirect() {
+    function hasError() {
         const bodyText = document.body?.innerText?.toLowerCase() || '';
         return errorPatterns.some(pattern => bodyText.includes(pattern));
     }
 
-    function performRedirect() {
-        const destination = `https://xcancel.com${window.location.pathname}${window.location.search}${window.location.hash}`;
-        window.location.replace(destination);
+    function redirect() {
+        const newUrl = `https://xcancel.com${window.location.pathname}${window.location.search}${window.location.hash}`;
+        window.location.replace(newUrl);
     }
 
-    function init() {
-        if (shouldRedirect()) {
-            performRedirect();
-        }
+    // Immediate check
+    if (hasError()) {
+        redirect();
+        return; // Stop script execution
     }
 
-    // Jalankan segera untuk konten yang sudah load
-    init();
-
-    // Tambahkan observer untuk handle konten dynamic
+    // Setup observer with auto-cleanup
     const observer = new MutationObserver(() => {
-        if (shouldRedirect()) {
-            observer.disconnect();
-            performRedirect();
+        if (hasError()) {
+            cleanup();
+            redirect();
         }
     });
 
+    const timeoutId = setTimeout(() => {
+        cleanup();
+        if (hasError()) redirect();
+    }, 3000);
+
+    function cleanup() {
+        observer.disconnect();
+        clearTimeout(timeoutId);
+        window.removeEventListener('beforeunload', cleanup);
+    }
+
+    // Start monitoring
     observer.observe(document.body, {
         childList: true,
         subtree: true,
         characterData: true
     });
 
-    // Fallback timeout
-    setTimeout(() => {
-        if (shouldRedirect()) {
-            performRedirect();
-        }
-    }, 3000);
+    window.addEventListener('beforeunload', cleanup);
 })();
