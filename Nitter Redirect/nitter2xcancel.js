@@ -10,7 +10,7 @@
 (function() {
     'use strict';
 
-    // Variasi pesan error yang mungkin
+    // Variasi pesan error
     const errorPatterns = [
         "no auth tokens",
         "rate limited",
