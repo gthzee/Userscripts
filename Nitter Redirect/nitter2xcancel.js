@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Nitter.net Auto-Redirect
+// @namespace    https://github.com/gthzee/
 // @version      1.6
 // @description  Redirect to xcancel.com when Nitter shows rate limit error
 // @author       gthzee
 // @match        *://nitter.net/*
 // @grant        none
+// @license      MIT
 // ==/UserScript==
 
 (function() {
