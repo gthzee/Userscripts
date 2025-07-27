@@ -36,7 +36,7 @@ Other userscript managers may work but are not officially supported.
 ## 🚀 Installation
 
 1. Install the [Violentmonkey](https://violentmonkey.github.io/) extension in your browser.
-2. [Click here to install the script](./x2nitter.js), or open the file and install it via Violentmonkey.
+2. [Click here to install the script](./x2nitter.user.js), or open the file and install it via Violentmonkey.
 3. Alternatively, copy the contents of `x2nitter.js` and paste it into a new script inside Violentmonkey:
    - Click the Violentmonkey icon → **Create a new script**
    - Paste the code and save
