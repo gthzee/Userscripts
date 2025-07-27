@@ -1,73 +1,49 @@
-🔁 Twitter → Nitter → XCancel (x2nitter.js)
+# 🔁 Nitter.net Auto-Redirect (`x2nitter.js`)
 
-A userscript that automatically redirects X.com / Twitter.com to Nitter.net, and then to XCancel.com if Nitter is rate-limited, overloaded, or down.
+Automatically redirects **Twitter/X** links to [nitter.net](https://nitter.net), and falls back to [xcancel.com](https://xcancel.com) when Nitter is **rate-limited**, **overloaded**, or down.
 
-Browse Twitter content through a privacy-friendly frontend — with automatic fallback when Nitter fails.
-⚙️ How It Works
+Useful when browsing Twitter through a privacy-friendly frontend — this script ensures uninterrupted viewing even when Nitter fails.
 
-This script performs two main functions:
-🔄 1. Redirect X.com / Twitter → Nitter.net
+---
 
-When visiting:
+## ⚙️ How It Works
 
-    https://x.com/*
+The script handles two types of redirection:
 
-    https://twitter.com/*
+- If you're visiting `x.com` or `twitter.com`, it redirects you to the same path on **nitter.net**
+- If you're on `nitter.net` and the page shows errors like:
 
-You are instantly redirected to:
+  - `no auth tokens`
+  - `rate limited`
+  - `try again later`
+  - `instance overloaded`
+  - `nitter.net is down`
+  - `be back shortly`
 
-    https://nitter.net/*
-    (URL path, query string, and hash are preserved)
+  ...then you're redirected to the same content on **xcancel.com**
 
-🚨 2. Redirect Nitter Errors → XCancel
+This works both on page load and when content is updated dynamically.
 
-If Nitter displays an error such as:
+---
 
-    no auth tokens
+## 🧩 Requirements
 
-    rate limited
+Designed for use with [Violentmonkey](https://violentmonkey.github.io/).  
+Other userscript managers may work but are not officially supported.
 
-    try again later
+---
 
-    instance overloaded
+## 🚀 Installation
 
-    nitter.net is down
+1. Install the [Violentmonkey](https://violentmonkey.github.io/) extension in your browser.
+2. [Click here to install the script](./x2nitter.js), or open the file and install it via Violentmonkey.
+3. Alternatively, copy the contents of `x2nitter.js` and paste it into a new script inside Violentmonkey:
+   - Click the Violentmonkey icon → **Create a new script**
+   - Paste the code and save
 
-    be back shortly
+---
 
-Then it automatically redirects to:
+## ⚠️ Disclaimer
 
-    https://xcancel.com/*
-    (same path and parameters as original)
-
-The script checks both immediately and dynamically via a DOM observer.
-🧩 Requirements
-
-    ✅ Violentmonkey (recommended)
-
-    ⚠️ Other userscript managers (e.g., Tampermonkey, Greasemonkey) may work but are not officially tested
-
-🚀 Installation
-
-    Install Violentmonkey in your browser
-
-    Click here to install the script (or open and copy the contents)
-
-    Or manually:
-
-        Click the Violentmonkey icon → Create a new script
-
-        Paste the contents of x2nitter.js
-
-        Save and enable it
-
-📄 Filename
-
-Save this script as:
-
-x2nitter.js
-
-⚠️ Disclaimer
-
-This script is provided as-is, without warranties or guarantees.
-Use at your own risk.
+This script is provided **as-is**, with no warranties or guarantees.  
+Use it at your **own risk**.
