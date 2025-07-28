@@ -2,7 +2,7 @@
 // @name         Universal Dark Mode 🌒
 // @namespace    https://github.com/gthzee/
 // @version      1.4
-// @description  Universal dark mode with a random hardcoded background color (black, dark gray, or navy) and random link colors
+// @description  Dark mode with random static background & random bright links
 // @author       gthzee
 // @match        *://*/*
 // @grant        GM_registerMenuCommand
