@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Universal Dark Mode 🌒
 // @namespace    https://github.com/gthzee/
-// @version      1.3
+// @version      1.4
 // @description  Universal dark mode with a random hardcoded background color (black, dark gray, or navy) and random link colors
 // @author       gthzee
 // @match        *://*/*
@@ -51,18 +51,31 @@
         }
     };
 
-    // Link handling
+    // Link handling (with brightness control)
+    const getBrightness = (hex) => {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        return (r * 299 + g * 587 + b * 114) / 1000;
+    };
+
+    const getReadableRandomColor = () => {
+        let hex, brightness;
+        do {
+            hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
+            brightness = getBrightness(hex);
+        } while (brightness < 120); // Avoid colors that are too dark
+        return `#${hex}`;
+    };
+
     const colorizeLinks = () => {
         if (!isDark) return;
 
         const links = document.querySelectorAll('a[href]');
         links.forEach(a => {
             if (!a.hasAttribute('data-dm-colored')) {
-                a.style.setProperty(
-                    'color',
-                    '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0'),
-                    'important'
-                );
+                const color = getReadableRandomColor();
+                a.style.setProperty('color', color, 'important');
                 a.setAttribute('data-dm-colored', 'true');
             }
         });
@@ -80,7 +93,6 @@
     const refresh = () => {
         if (isDark) {
             applyStyle();
-            // Double RAF ensures DOM is ready for links
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     colorizeLinks();
