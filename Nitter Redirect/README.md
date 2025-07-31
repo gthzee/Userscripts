@@ -1,4 +1,4 @@
-# 🔁 Nitter.net Auto-Redirect (`nitter2xcancel.js`)
+# 🔁 Nitter.net Auto-Redirect (`nitter2xcancel.user.js`)
 
 Automatically redirects to [xcancel.com](https://xcancel.com) when [nitter.net](https://nitter.net) displays a **rate limit** or **auth token** error.
 
