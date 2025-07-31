@@ -1,4 +1,4 @@
-# 🔁 Nitter.net Auto-Redirect (`x2nitter.js`)
+# 🔁 Nitter.net Auto-Redirect (`x2nitter.user.js`)
 
 Automatically redirects **Twitter/X** links to [nitter.net](https://nitter.net), and falls back to [xcancel.com](https://xcancel.com) when Nitter is **rate-limited**, **overloaded**, or down.
 
