@@ -61,9 +61,8 @@ No external config files required. Just update the arrays and save the script.
 The script runs on most Nitter frontends, including:
 
 - `https://nitter.net/*`
-- `https://*.nitter.*/*`
 - `https://nitter.*/*`
-- `https://*.nitter.*/*`
+- `https://nitter.*.*/*`
 - `https://xcancel.*/*`
 
 ---
