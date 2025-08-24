@@ -50,3 +50,37 @@ const DEFAULT_BLOCKED_HASHTAGS = [
 const HIDE_RETWEETER = true;  // Hide retweets from blocked users
 const USE_BLUR = false;       // Set to true to blur instead of hide
 const DEBUG = false;          // Enable debug logging
+```
+
+No external config files — just update the arrays and save.
+
+---
+
+## 🌐 Supported Domains
+
+The script runs on all common Nitter mirrors, including:
+
+- `nitter.net`
+- Any `*.nitter.*` subdomain (e.g., `nitter.snopyta.org`)
+- [xcancel.com](https://xcancel.com)
+
+---
+
+## 🔄 Behavior Summary
+
+| Content Type         | Hidden If Blocked?                      |
+|----------------------|------------------------------------------|
+| Tweet author         | ✅ Yes                                   |
+| Retweeter            | ✅ If `HIDE_RETWEETER` is `true`         |
+| Quoted tweet author  | ✅ Yes                                   |
+| Hashtag              | ✅ Yes                                   |
+| Suspended account    | ⚠️ One-time notice shown per page load   |
+| User card / search   | ✅ Yes                                   |
+
+---
+
+## ⚠️ Disclaimer
+
+This script is provided **as-is**, with no warranties or guarantees.  
+You are responsible for editing the blocklist to suit your preferences.  
+Use at your **own risk**.
