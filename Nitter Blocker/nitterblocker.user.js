@@ -5,9 +5,9 @@
 // @description  Hide posts from blocked users or hashtags + alert suspended accounts (only once on load)
 // @author       gthzee
 // @match        *://nitter.net/*
+// @match        *://nitter.*.*/*
 // @match        *://nitter.*/*
-// @match        *://*.nitter.*/*
-// @match        *://xcancel.*/*
+// @match        *://xcancel.com/*
 // @grant        none
 // @run-at       document-idle
 // @license      MIT
