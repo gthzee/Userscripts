@@ -1,42 +1,42 @@
 # 🚫 Nitter Blocker (`nitterblocker.user.js`)
 
-Hide posts from **blocked users** or **hashtags** on Nitter-based frontends, and get notified when suspended or deleted accounts are detected (once per page load).
+A userscript that hides posts from **blocked users** or **hashtags** on Nitter-based frontends, and shows a one-time alert when suspended or deleted accounts are detected.
 
-Perfect for cleaning up your feed when using [Nitter](https://nitter.net), [xcancel.com](https://xcancel.com), or similar privacy-friendly Twitter frontends.
+Perfect for cleaning up your timeline while browsing via [Nitter](https://nitter.net), [xcancel.com](https://xcancel.com), or similar privacy-friendly Twitter frontends.
 
 ---
 
 ## ⚙️ Features
 
-- 🔕 **Block specific users** – Hides tweets, retweets, quote tweets, and user cards from predefined usernames.
-- 🏷️ **Block specific hashtags** – Removes posts containing undesired tags.
-- 🔁 **Retweeter filtering** – Optionally hide posts retweeted by blocked users.
-- ⚠️ **Suspended account alerts** – Highlights if a blocked account is suspended or deleted, only once per load.
-- 🎨 **Blur instead of hide** – Optional visual effect instead of full removal.
+- 🔕 **Block specific users** – Hides tweets, retweets, quote tweets, and user cards from defined usernames.
+- 🏷️ **Block specific hashtags** – Hides posts containing any blocked hashtags.
+- 🔁 **Retweet filtering** – Optionally hide posts retweeted by blocked users.
+- ⚠️ **Suspended account alerts** – Warns if any blocked user appears suspended or deleted (shown once per page load).
+- 🎨 **Blur instead of hide** – Optional setting to blur hidden content instead of fully removing it.
 
 ---
 
 ## 🧩 Requirements
 
-Designed for use with [Violentmonkey](https://violentmonkey.github.io/).  
-Other userscript managers (e.g. Tampermonkey, Greasemonkey) may also work but are not officially supported.
+- ✅ Built for [Violentmonkey](https://violentmonkey.github.io/)
+- ⚠️ Other userscript managers (e.g. Tampermonkey, Greasemonkey) may work but are not officially supported
 
 ---
 
 ## 🚀 Installation
 
-1. Install the [Violentmonkey browser extension](https://violentmonkey.github.io/).
-2. [Click here to install the script](./nitterblocker.user.js), or open the file directly and install it via Violentmonkey.
+1. Install the [Violentmonkey browser extension](https://violentmonkey.github.io/)
+2. [Click here to install the script](./nitterblocker.user.js), or open the file and install it via Violentmonkey
 3. Or install manually:
    - Click the Violentmonkey icon → **Create a new script**
    - Paste in the contents of `nitterblocker.user.js`
-   - Save and reload your Nitter page
+   - Save and refresh your Nitter tab
 
 ---
 
 ## 🛠️ Configuration
 
-To customize the blocking behavior, edit the script directly:
+To customize blocked users and hashtags, open the script in your userscript manager and edit the config section:
 
 ```js
 const DEFAULT_BLOCKED = [
@@ -47,28 +47,30 @@ const DEFAULT_BLOCKED_HASHTAGS = [
   'crypto', 'nsfw', 'someevent'
 ];
 
-const HIDE_RETWEETER = true;  // Hide retweets from blocked users
+const HIDE_RETWEETER = true;  // Hide retweets by blocked users
 const USE_BLUR = false;       // Set to true to blur instead of hide
-const DEBUG = false;          // Enable debug logging
+const DEBUG = false;          // Enable console logs
 ```
 
-No external config files — just update the arrays and save.
+No external config files required. Just update the arrays and save the script.
 
 ---
 
 ## 🌐 Supported Domains
 
-The script runs on all common Nitter mirrors, including:
+The script runs on most Nitter frontends, including:
 
-- `nitter.net`
-- Any `*.nitter.*` subdomain (e.g., `nitter.snopyta.org`)
-- [xcancel.com](https://xcancel.com)
+- `https://nitter.net/*`
+- `https://*.nitter.*/*`
+- `https://nitter.*/*`
+- `https://*.nitter.*/*`
+- `https://xcancel.*/*`
 
 ---
 
 ## 🔄 Behavior Summary
 
-| Content Type         | Hidden If Blocked?                      |
+| Content Type         | Hidden if Blocked?                      |
 |----------------------|------------------------------------------|
 | Tweet author         | ✅ Yes                                   |
 | Retweeter            | ✅ If `HIDE_RETWEETER` is `true`         |
@@ -82,5 +84,5 @@ The script runs on all common Nitter mirrors, including:
 ## ⚠️ Disclaimer
 
 This script is provided **as-is**, with no warranties or guarantees.  
-You are responsible for editing the blocklist to suit your preferences.  
+You are responsible for editing the blocklists to suit your needs.  
 Use at your **own risk**.
