@@ -9,7 +9,7 @@ Applies a universal dark mode on **all websites** you visit, using a random dark
 - Randomizes the colors of all links (`<a href>`) on the page.
 - Watches for dynamically added content and recolors new links accordingly.
 - Saves your dark mode preference per domain in `localStorage`.
-- Provides menu commands to toggle dark mode with or without page reload.
+- Provides menu commands to toggle dark mode without page reload.
 
 ## 🧩 Requirements
 
