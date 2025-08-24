@@ -7,6 +7,8 @@
 // @match        *://x.com/*
 // @match        *://twitter.com/*
 // @match        *://nitter.net/*
+// @match        *://nitter.*.*/*
+// @match        *://xcancel.com/*
 // @grant        none
 // @license      MIT
 // ==/UserScript==
