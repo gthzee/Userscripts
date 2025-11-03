@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Deanimator
+// @name         Universal Motion Removal
 // @namespace    https://github.com/gthzee/
 // @version      2.3
 // @description  Disable animations and transitions without performance issues
