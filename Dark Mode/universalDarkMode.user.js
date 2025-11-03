@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name          Universal Dark Mode 🌒
 // @namespace     https://github.com/gthzee/
-// @version       3.7
-// @description   Universal dark mode with WordPress editor enhancement, toggle options, and TwitterViewer.net support
+// @version       4.5
+// @description   Universal dark mode with WordPress editor enhancement, toggle options, TwitterViewer.net support, and UNTHROTTLED link coloring
 // @author        gthzee
 // @match         *://*/*
 // @grant         GM_registerMenuCommand
@@ -13,52 +13,95 @@
 (function() {
     'use strict';
 
-    // ===== CONFIGURATION =====
     const STORAGE_KEY = "dm_" + location.hostname;
     const WORDPRESS_STORAGE_KEY = "wp_dm_style";
+
     const STYLE_ID = "dm_style";
     const WORDPRESS_STYLE_ID = "wp_dm_style";
-    const BACKGROUND_STYLES = [
-        { bg: '#121212', text: '#e0e0e0' },
-        { bg: '#2d2d2d', text: '#e0e0e0' },
-        { bg: '#1e1f2f', text: '#e0e0e0' }
-    ];
-    const LINK_MIN_BRIGHTNESS = 130;
-    const LINK_MAX_BRIGHTNESS = 200;
-    const CHUNK_SIZE = 100; // Process elements in chunks
 
-    // ===== STATE MANAGEMENT =====
+    const BACKGROUND_STYLES = [
+        {
+            bg: '#121212',
+            textColors: ['#FFFFFF', '#F5F5F5', '#E0E0E0', '#BDBDBD', '#40C4FF',
+                         '#64FFDA', '#7C4DFF', '#FF6E40', '#69F0AE', '#FFD740',
+                         '#B388FF', '#8C9EFF', '#82B1FF', '#84FFFF', '#E1BEE7']
+        },
+        {
+            bg: '#2d2d2d',
+            textColors: ['#E0F7FA', '#B3E5FC', '#C5CAE9', '#D1C4E9', '#F8BBD0',
+                         '#FFF8E1', '#FBE9E7', '#EFEBE9', '#D7CCC8', '#B0BEC5',
+                         '#E1F5FE', '#F3E5F5', '#E8F5E9', '#FFF9C4', '#FFCDD2']
+        },
+        {
+            bg: '#1e1f2f',
+            textColors: ['#A6E3E9', '#71C9CE', '#C3ACD0', '#FFB6B9', '#B4E7CE',
+                         '#FFE5B4', '#FFDAB9', '#F0E68C', '#DDA0DD', '#F5DEB3',
+                         '#00FFF0', '#FF10F0', '#39FF14', '#FFFF00', '#C77DFF']
+        }
+    ];
+
+    const LINK_MIN_BRIGHTNESS = 130;
+    const LINK_MAX_BRIGHTNESS = 220;
+
     let isUniversalDarkMode = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'true');
     let isWordPressDarkMode = false;
+
     let universalStyleElement = null;
     let wordpressStyleElement = null;
-    let observers = [];
-    let dynamicContentObserver = null;
+
+    let mainObserver = null;
     let wordpressObserver = null;
-    let wordpressIntervalId = null;
-    let refreshTimeout = null;
+    let linkObserver = null;
 
-    // ===== RACE CONDITION PREVENTION =====
-    let colorizeFrameId = null;
-    let fixWhiteFrameId = null;
-    let isColorizing = false;
-    let isFixingWhite = false;
-    const pendingColorize = new Set();
-    const pendingFixWhite = new Set();
+    let observersActive = false;
+    let observerDebounceTimer = null;
 
-    // ===== SITE DETECTION =====
+    const createElementCache = () => {
+        const cache = {
+            body: null,
+            links: null,
+            inputs: null,
+            images: null,
+            allElements: null,
+            wpContentElements: null
+        };
+
+        const makeGetter = (key, queryFn) => () => cache[key] || (cache[key] = queryFn());
+
+        return {
+            getBody: makeGetter('body', () => document.body),
+            getLinks: makeGetter('links', () => document.querySelectorAll('a[href]')),
+            getInputs: makeGetter('inputs', () => document.querySelectorAll('input, textarea, select')),
+            getImages: makeGetter('images', () => document.querySelectorAll('img, video, iframe')),
+            getAllElements: makeGetter('allElements', () => document.querySelectorAll('*')),
+            getWpContentElements: makeGetter('wpContentElements', () => document.querySelectorAll('#wpcontent *')),
+
+            invalidate() {
+                Object.keys(cache).forEach(k => cache[k] = null);
+            },
+            invalidateLinks() { cache.links = null; },
+            invalidateAllElements() { cache.allElements = null; },
+            invalidateWpContentElements() { cache.wpContentElements = null; }
+        };
+    };
+
+    const elementCache = createElementCache();
+
     const isTorrentFreak = /torrentfreak\.com$/i.test(location.hostname);
     const isOldReddit = /old\.reddit\.com$/i.test(location.hostname) && /^\/r\//i.test(location.pathname);
     const isWordPress = /wp-admin\/post-new\.php$|wp-admin\/post\.php$/.test(location.pathname);
-    // --- NEW: TwitterViewer.net Detection ---
     const isTwitterViewer = /twitterviewer\.net$/i.test(location.hostname);
 
-    // Initialize WordPress dark mode state if on WordPress page
     if (isWordPress) {
         isWordPressDarkMode = JSON.parse(localStorage.getItem(WORDPRESS_STORAGE_KEY) ?? 'false');
+    } else {
+        const saved = localStorage.getItem(WORDPRESS_STORAGE_KEY);
+        if (saved === 'true') {
+            localStorage.setItem(WORDPRESS_STORAGE_KEY, 'false');
+        }
+        isWordPressDarkMode = false;
     }
 
-    // ===== COLOR UTILITIES =====
     const getDerivedColor = (hex, adjustment) => {
         const r = parseInt(hex.slice(1, 3), 16);
         const g = parseInt(hex.slice(3, 5), 16);
@@ -69,19 +112,24 @@
                adjust(b).toString(16).padStart(2, '0');
     };
 
-    // Set base colors based on site
-    const selected = BACKGROUND_STYLES[Math.floor(Math.random() * BACKGROUND_STYLES.length)];
-    const selectedBg = selected.bg;
-    const selectedText = selected.text;
+    let selectedBg, selectedText;
+    if (isWordPress) {
+        selectedBg = '#1a1a1a';
+        selectedText = '#e0e0e0';
+    } else {
+        const chosenStyle = BACKGROUND_STYLES[Math.floor(Math.random() * BACKGROUND_STYLES.length)];
+        selectedBg = chosenStyle.bg;
+        const textOptions = chosenStyle.textColors;
+        selectedText = textOptions[Math.floor(Math.random() * textOptions.length)];
+    }
+
     const colors = {
         article: getDerivedColor(selectedBg, 0.1),
         content: getDerivedColor(selectedBg, 0.15),
         code: getDerivedColor(selectedBg, 0.05),
-        border: getDerivedColor(selectedBg, 0.2),
         input: getDerivedColor(selectedBg, 0.08)
     };
 
-    // ===== LINK COLOR UTILITIES =====
     const calculateColorBrightness = (hexColor) => {
         if (hexColor.length === 3) {
             hexColor = hexColor[0] + hexColor[0] + hexColor[1] + hexColor[1] + hexColor[2] + hexColor[2];
@@ -106,106 +154,120 @@
         return `#${hexColor}`;
     };
 
-    // ===== WORDPRESS DARK MODE CSS =====
-    const wordpressDarkStyles = `
-        :root {
-            --bg-dark: #1a1a1a;
-            --bg-medium: #2d2d2d;
-            --bg-light: #3a3a3a;
-            --text-primary: #e0e0e0;
-            --text-secondary: #b0b0b0;
-            --accent: #5b9dd9;
-            --border: #444;
-        }
-        html,body {
-            background: var(--bg-dark) !important;
-            color: var(--text-primary) !important;
-        }
-        #wpcontent,#wpbody,#wpbody-content,.wrap {
-            background: var(--bg-dark) !important;
-            color: var(--text-primary) !important;
-        }
-        .postbox,.inside {
-            background: var(--bg-medium) !important;
-        }
-        .wp-editor-container,#wp-content-wrap,.mce-container,.mce-panel,.mce-edit-area,.wp-editor-area {
-          background: var(--bg-medium) !important;
-          color: var(--text-primary) !important;
-        }
-        #content,.mce-content-body {
-            background: var(--bg-light) !important;
-            color: var(--text-primary) !important;
-        }
-        .button,.button-primary,.button-secondary,#publish {
-          background: var(--bg-light) !important;
-          color: var(--text-primary) !important;
-          border-color: var(--border) !important;
-        }
-        .button-primary,#publish {
-            background: var(--accent) !important;
-            color: #fff !important;
-        }
-        input,textarea,select {
-            background: var(--bg-light) !important;
-            color: var(--text-primary) !important;
-            border-color: var(--border) !important;
-        }
-        a {
-            color: var(--accent) !important;
-        }
-        img,video,iframe {
-            filter: invert(0.9) hue-rotate(180deg);
-            background: transparent !important;
-        }
-        .editor-styles-wrapper,.block-editor-block-list__layout,.components-panel,.components-button {
-          background: var(--bg-medium) !important;
-          color: var(--text-primary) !important;
-        }
-        .block-editor-block-list__block {
-            background: var(--bg-light) !important;
-        }
-        [style*="background: white"],[style*="background-color: white"],[style*="background: #fff"],
-        [style*="background-color: #fff"],[style*="background: rgb(255, 255, 255)"] {
-          background: var(--bg-dark) !important;
-        }
-        [style*="color: black"],[style*="color: #000"],[style*="color: rgb(0, 0, 0)"] {
-          color: var(--text-primary) !important;
-        }
-        #adminmenu,#adminmenuwrap,#wpadminbar {
-          background: var(--bg-medium) !important;
-          color: var(--text-primary) !important;
-        }
-    `;
+    const generateBaseCSS = () => {
+        return `
+            html, body {
+                background: ${selectedBg} !important;
+                color: ${selectedText} !important;
+            }
 
-    // =======================================================================
-    // == UPDATED: TWITTERVIEWER.NET DARK MODE CSS (Now using universal colors) ==
-    // =======================================================================
+            ::selection {
+                background: inherit !important;
+            }
+        `;
+    };
+
+    const generateWordPressCSS = () => {
+        if (!isWordPress) return '';
+
+        const wpBg = selectedBg;
+        const wpBgMedium = colors.article;
+        const wpBgLight = colors.content;
+        const wpText = selectedText;
+        const wpTextSecondary = getDerivedColor(selectedText, -0.3);
+        const wpAccent = '#5b9dd9';
+
+        return `
+            :root {
+                --bg-dark: ${wpBg};
+                --bg-medium: ${wpBgMedium};
+                --bg-light: ${wpBgLight};
+                --text-primary: ${wpText};
+                --text-secondary: ${wpTextSecondary};
+                --accent: ${wpAccent};
+            }
+            html, body {
+                background: var(--bg-dark) !important;
+                color: var(--text-primary) !important;
+            }
+            #wpcontent, #wpbody, #wpbody-content, .wrap {
+                background: var(--bg-dark) !important;
+                color: var(--text-primary) !important;
+            }
+            .postbox, .inside {
+                background: var(--bg-medium) !important;
+            }
+            .wp-editor-container, #wp-content-wrap, .mce-container, .mce-panel, .mce-edit-area, .wp-editor-area {
+                background: var(--bg-medium) !important;
+                color: var(--text-primary) !important;
+            }
+            #content, .mce-content-body {
+                background: var(--bg-light) !important;
+                color: var(--text-primary) !important;
+            }
+            .button, .button-primary, .button-secondary, #publish {
+                background: var(--bg-light) !important;
+                color: var(--text-primary) !important;
+            }
+            .button-primary, #publish {
+                background: var(--accent) !important;
+                color: #fff !important;
+            }
+            input, textarea, select {
+                background: var(--bg-light) !important;
+                color: var(--text-primary) !important;
+            }
+            a {
+                color: var(--accent) !important;
+            }
+            img, video, iframe {
+                filter: invert(0.9) hue-rotate(180deg);
+                background: transparent !important;
+            }
+            .editor-styles-wrapper, .block-editor-block-list__layout, .components-panel, .components-button {
+                background: var(--bg-medium) !important;
+                color: var(--text-primary) !important;
+            }
+            .block-editor-block-list__block {
+                background: var(--bg-light) !important;
+            }
+            [style*="background: white"],
+            [style*="background-color: white"],
+            [style*="background: #fff"],
+            [style*="background-color: #fff"],
+            [style*="background: rgb(255, 255, 255)"] {
+                background: var(--bg-dark) !important;
+            }
+            [style*="color: black"],
+            [style*="color: #000"],
+            [style*="color: rgb(0, 0, 0)"] {
+                color: var(--text-primary) !important;
+            }
+            #adminmenu, #adminmenuwrap, #wpadminbar {
+                background: var(--bg-medium) !important;
+                color: var(--text-primary) !important;
+            }
+
+        `;
+    };
+
     const generateTwitterViewerCSS = () => {
         if (!isTwitterViewer) return '';
 
-        // Use universal colors instead of specific TwitterViewer colors
         const tvBg = selectedBg;
         const tvCard = colors.article;
-        const tvHover = colors.content;
         const tvText = selectedText;
-        const tvSecondary = getDerivedColor(selectedText, -0.3); // A bit darker than text
-        const tvLink = generateReadableRandomColor(); // Use the same link color generation as universal mode
-        const tvBorder = colors.border;
+        const tvSecondary = getDerivedColor(selectedText, -0.3);
+        const tvLink = generateReadableRandomColor();
 
         return `
-            html, body {
-                background: ${tvBg} !important;
-                color: ${tvText} !important;
-            }
+            ${generateBaseCSS()}
 
-            /* --- Layout & Containers --- */
             .container, main, .tweet-card, .user-info-card, section, article, .content, .wrapper, .container-fluid {
                 background-color: ${tvCard} !important;
-                border: 1px solid ${tvBorder} !important;
                 border-radius: 8px;
             }
 
-            /* --- Typography --- */
             h1, h2, h3, h4, h5, h6, p, span, div {
                 color: ${tvText} !important;
             }
@@ -214,7 +276,6 @@
                 color: ${tvLink} !important;
             }
 
-            /* --- Tweet Specific Elements --- */
             .tweet-author-name {
                 color: ${tvText} !important;
                 font-weight: bold;
@@ -229,48 +290,30 @@
                 line-height: 1.5;
             }
 
-            .tweet-card:hover, .user-info-card:hover {
-                background-color: ${tvHover} !important;
-                transition: background-color 0.2s ease-in-out;
-            }
-
-            /* --- Header & Navigation --- */
             header {
                 background-color: ${tvCard} !important;
-                border-bottom: 1px solid ${tvBorder} !important;
             }
 
             header a, header h1 {
                 color: ${tvText} !important;
             }
 
-            /* --- Forms & Inputs --- */
             input[type="text"], input[type="search"], textarea {
-                background-color: ${tvHover} !important;
+                background-color: ${tvCard} !important;
                 color: ${tvText} !important;
-                border: 1px solid ${tvBorder} !important;
             }
 
             input::placeholder {
                 color: ${tvSecondary} !important;
             }
 
-            /* --- Buttons --- */
             button, .btn {
-                background-color: ${tvHover} !important;
+                background-color: ${tvCard} !important;
                 color: ${tvText} !important;
-                border: 1px solid ${tvBorder} !important;
             }
 
-            button:hover, .btn:hover {
-                background-color: ${getDerivedColor(selectedBg, 0.25)} !important;
-                cursor: pointer;
-            }
-
-            /* --- Footer --- */
             footer {
                 background-color: ${tvCard} !important;
-                border-top: 1px solid ${tvBorder} !important;
                 color: ${tvSecondary} !important;
             }
 
@@ -278,13 +321,10 @@
                 color: ${tvSecondary} !important;
             }
 
-            /* --- Scrollbar --- */
             ::-webkit-scrollbar { width: 8px; }
             ::-webkit-scrollbar-track { background: ${tvBg}; }
-            ::-webkit-scrollbar-thumb { background: ${tvBorder}; border-radius: 4px; }
-            ::-webkit-scrollbar-thumb:hover { background: ${getDerivedColor(selectedBg, 0.3)}; }
+            ::-webkit-scrollbar-thumb { background: ${getDerivedColor(selectedBg, 0.3)}; border-radius: 4px; }
 
-            /* --- Specific Fixes for Utility Classes --- */
             .bg-white, [class*="bg-white"] {
                 background-color: ${tvCard} !important;
             }
@@ -302,46 +342,11 @@
                 background-color: ${tvCard} !important;
                 color: ${tvText} !important;
             }
-        `;
-    };
 
-
-    // ===== CSS GENERATION =====
-    const generateBaseCSS = () => {
-        return `
-            html, body {
-                background: ${selectedBg} !important;
-                color: ${selectedText} !important;
+            ::selection {
+                background: ${colors.content} !important;
+                color: ${tvText} !important;
             }
-        `;
-    };
-
-    const generateUniversalCSS = () => {
-        return `
-            ${generateBaseCSS()}
-            * {
-                background-color: transparent !important;
-                border-color: ${colors.border} !important;
-                color: inherit !important;
-            }
-            input, textarea, select {
-                background-color: ${colors.input} !important;
-                border-color: ${colors.border} !important;
-                color: ${selectedText} !important;
-            }
-            img, video, iframe {
-                filter: brightness(0.9) contrast(1.1) !important;
-            }
-            ::selection, :-moz-selection, ::-moz-selection {
-                background: ${getDerivedColor(selectedBg, 0.3)} !important;
-                color: #fff !important;
-            }
-            ::placeholder, :-ms-input-placeholder, ::-ms-input-placeholder {
-                color: #aaa !important;
-                opacity: 1 !important;
-            }
-            svg:not([fill]) { fill: ${selectedText} !important; }
-            svg:not([stroke]) { stroke: ${selectedText} !important; }
         `;
     };
 
@@ -354,7 +359,6 @@
                 --tf-bg: ${selectedBg};
                 --tf-article-bg: ${colors.article};
                 --tf-text: ${selectedText};
-                --tf-border: ${colors.border};
                 --tf-code-bg: ${colors.code};
                 --tf-input-bg: ${colors.input};
             }
@@ -367,7 +371,6 @@
             *, *::before, *::after {
                 background-color: var(--tf-bg) !important;
                 color: var(--tf-text) !important;
-                border-color: var(--tf-border) !important;
             }
 
             img, iframe, embed, video, canvas, svg, path {
@@ -395,20 +398,17 @@
 
             pre, code, blockquote {
                 background-color: var(--tf-code-bg) !important;
-                border-left: 3px solid var(--tf-border) !important;
                 color: #ccc !important;
             }
 
             input, textarea, button, select {
                 background-color: var(--tf-input-bg) !important;
                 color: #eee !important;
-                border: 1px solid var(--tf-border) !important;
             }
 
             table, th, td {
                 background-color: var(--tf-article-bg) !important;
                 color: var(--tf-text) !important;
-                border-color: var(--tf-border) !important;
             }
 
             [style*="background-color: white"], [style*="background-color: #fff"],
@@ -428,19 +428,17 @@
         `;
     };
 
-    const generateOldRedditCSS = () => {
+     const generateOldRedditCSS = () => {
         if (!isOldReddit) return '';
 
         return `
-            ${generateBaseCSS()}
-            body, .content, .side, .link, .comment, .entry, .usertext, .md, .titlebox, .linklisting, .thing,
+            html, body, .content, .side, .link, .comment, .entry, .usertext, .md, .titlebox, .linklisting, .thing,
             .child, .midcol, .tagline, .tabmenu, .tabmenu li, .tabmenu li a, .sitetable, .nestedlisting,
             .commentarea, .footer, .footer-parent, .debuginfo, .roundfield, .formtabs-content, .morelink,
             .infobar, .menuarea, .searchpane, .searchfacets, .raisedbox, .modactionlisting, .modactiontable,
             .nextprev, .nav-buttons, .flat-list, .buttons {
                 background-color: ${selectedBg} !important;
                 color: ${selectedText} !important;
-                border-color: ${colors.border} !important;
             }
 
             .usertext-body, .usertext-edit, .md {
@@ -463,12 +461,20 @@
             .infobar {
                 background-color: ${colors.content} !important;
                 color: ${selectedText} !important;
-                border: ${colors.border} !important;
             }
 
             .header {
                 background-color: ${colors.article} !important;
-                border-bottom: ${colors.border} !important;
+            }
+
+            #header-bottom-left {
+                background-color: ${colors.article} !important;
+                color: ${selectedText} !important;
+            }
+
+            #sr-header-area {
+                background-color: ${colors.article} !important;
+                color: ${selectedText} !important;
             }
 
             .tabmenu li a {
@@ -528,14 +534,6 @@
                 background-color: ${colors.content} !important;
             }
 
-            /* Comment borders */
-            .comment .child, .comment .child .comment .child, .comment .child .comment .child .comment .child,
-            .comment .child .comment .child .comment .child .comment .child, .stickied .child,
-            .stickied .comment .child, .stickied .comment .child .comment .child,
-            .stickied .comment .child .comment .child .comment .child {
-                border-left: ${colors.border} !important;
-            }
-
             /* Voting areas */
             .comment .midcol, .comment .child .comment .midcol, .comment .child .comment .child .comment .midcol,
             .stickied .midcol, .stickied .comment .midcol, .stickied .comment .child .comment .midcol {
@@ -555,7 +553,6 @@
                 color: ${selectedText} !important;
             }
 
-            /* IMPORTANT: Reddit comment ID selectors */
             .score-hidden.comment.noncollapsed.stickied[class*="id-t1_"].thing {
                 background-color: ${colors.article} !important;
             }
@@ -564,7 +561,6 @@
             .score-hidden.comment.noncollapsed.stickied[class*="id-t1_"].thing * * {
                 background-color: inherit !important;
                 color: ${selectedText} !important;
-                border-color: ${colors.border} !important;
             }
 
             .score-hidden.comment.noncollapsed.stickied[class*="id-t1_"].thing .entry,
@@ -575,7 +571,6 @@
             }
 
             .score-hidden.comment.noncollapsed.stickied[class*="id-t1_"].thing .child {
-                border-left: ${colors.border} !important;
                 background-color: transparent !important;
             }
 
@@ -592,7 +587,6 @@
             .comment.noncollapsed[class*="id-t1_"].thing * * {
                 background-color: inherit !important;
                 color: ${selectedText} !important;
-                border-color: ${colors.border} !important;
             }
 
             .comment.noncollapsed[class*="id-t1_"].thing .entry,
@@ -603,7 +597,6 @@
             }
 
             .comment.noncollapsed[class*="id-t1_"].thing .child {
-                border-left: ${colors.border} !important;
                 background-color: transparent !important;
             }
 
@@ -620,14 +613,12 @@
             .userattrs a, .submitter, .moderator, .admin, .friend, .flair {
                 background-color: ${colors.content} !important;
                 color: ${selectedText} !important;
-                border: ${colors.border} !important;
             }
 
             .tagline {
                 background-color: transparent !important;
             }
 
-            /* THIS WAS THE MISSING LINE */
             .new-comment .usertext-body {
                 background-color: ${colors.content} !important;
             }
@@ -638,47 +629,91 @@
         `;
     };
 
+    const generateUniversalCSS = () => {
+        return `
+            ${generateBaseCSS()}
+            * {
+                background-color: transparent !important;
+                color: inherit !important;
+            }
+
+            header, nav, main, aside, footer,
+            .header, .navigation, .nav, .menu, .topbar, .top-nav, .navbar, .toolbar, .sidebar,
+            #header, #navigation, #nav, #menu, #topbar, #top-nav, #navbar, #toolbar, #sidebar,
+            .container, .wrapper, .main-container, .content-wrapper, .page-wrapper,
+            .navbar, .navbar-expand-lg, .navbar-expand-md, .navbar-expand-sm, .navbar-expand-xl,
+            .mdc-top-app-bar, .mdc-drawer, .top-bar, .brand, .logo, .site-header, .site-nav,
+            .primary-nav, .secondary-nav {
+                background-color: inherit !important;
+            }
+
+            img, video, iframe {
+                filter: brightness(0.9) contrast(1.1) !important;
+            }
+
+            svg:not([fill]) { fill: ${selectedText} !important; }
+            svg:not([stroke]) { stroke: ${selectedText} !important;
+            }
+
+            ::selection {
+                background: ${colors.content} !important;
+                color: ${selectedText} !important;
+            }
+        `;
+    };
+
     const generateUniversalModeCSS = () => {
-        if (isTorrentFreak) {
+        if (isWordPress) {
+            return generateWordPressCSS();
+        } else if (isTorrentFreak) {
             return generateTorrentFreakCSS();
         } else if (isOldReddit) {
             return generateOldRedditCSS();
-        } else if (isTwitterViewer) { // --- NEW: Check for TwitterViewer ---
-            return generateTwitterViewerCSS(); // --- NEW: Use its specific CSS ---
+        } else if (isTwitterViewer) {
+            return generateTwitterViewerCSS();
         } else {
             return generateUniversalCSS();
         }
     };
 
-    // ===== WORDPRESS DARK MODE FUNCTIONS =====
-    const batchStyleChanges = (elements, styleUpdater) => {
-        let index = 0;
-
-        function processChunk() {
-            const end = Math.min(index + CHUNK_SIZE, elements.length);
-            for (; index < end; index++) {
-                styleUpdater(elements[index]);
-            }
-
-            if (index < elements.length) {
-                requestAnimationFrame(processChunk);
-            }
-        }
-
-        requestAnimationFrame(processChunk);
-    };
+    const FORCE_DM_ATTR = 'data-dm-wp-forced';
 
     const forceDarkMode = () => {
-        const allElements = document.querySelectorAll('#wpcontent *');
-        batchStyleChanges(allElements, (el) => {
+        if (!isWordPressDarkMode) return;
+
+        const allElements = elementCache.getWpContentElements();
+        for (let i = 0; i < allElements.length; i++) {
+            const el = allElements[i];
             const cs = window.getComputedStyle(el);
-            if (cs.backgroundColor === 'rgb(255, 255, 255)' || cs.backgroundColor === 'white')
+
+            if (
+                (cs.backgroundColor === 'rgb(255, 255, 255)' || cs.backgroundColor === 'white') &&
+                !el.hasAttribute(FORCE_DM_ATTR)
+            ) {
                 el.style.setProperty('background-color', 'var(--bg-dark)', 'important');
-            if (cs.color === 'rgb(0, 0, 0)' || cs.color === 'black')
+                el.setAttribute(FORCE_DM_ATTR, 'true');
+            }
+
+            if (
+                (cs.color === 'rgb(0, 0, 0)' || cs.color === 'black') &&
+                !el.hasAttribute(FORCE_DM_ATTR)
+            ) {
                 el.style.setProperty('color', 'var(--text-primary)', 'important');
-            if (cs.borderColor === 'rgb(255, 255, 255)' || cs.borderColor === 'white')
-                el.style.setProperty('border-color', 'var(--border)', 'important');
-        });
+                el.setAttribute(FORCE_DM_ATTR, 'true');
+            }
+        }
+    };
+
+    const cleanupForcedStyles = () => {
+        const allElements = elementCache.getWpContentElements();
+        for (let i = 0; i < allElements.length; i++) {
+            const el = allElements[i];
+            if (el.hasAttribute(FORCE_DM_ATTR)) {
+                el.style.removeProperty('background-color');
+                el.style.removeProperty('color');
+                el.removeAttribute(FORCE_DM_ATTR);
+            }
+        }
     };
 
     const applyWordPressDarkMode = () => {
@@ -686,14 +721,16 @@
 
         wordpressStyleElement = document.createElement('style');
         wordpressStyleElement.id = WORDPRESS_STYLE_ID;
-        wordpressStyleElement.textContent = wordpressDarkStyles;
+        wordpressStyleElement.textContent = generateWordPressCSS();
         (document.head || document.documentElement).appendChild(wordpressStyleElement);
 
         forceDarkMode();
-        window.addEventListener('load', forceDarkMode);
-        wordpressIntervalId = setInterval(forceDarkMode, 2000);
 
-        wordpressObserver = new MutationObserver(forceDarkMode);
+        wordpressObserver = new MutationObserver(() => {
+            elementCache.invalidateWpContentElements();
+            forceDarkMode();
+        });
+
         wordpressObserver.observe(document.body, {
             childList: true,
             subtree: true,
@@ -713,34 +750,29 @@
             wordpressObserver = null;
         }
 
-        if (wordpressIntervalId) {
-            clearInterval(wordpressIntervalId);
-            wordpressIntervalId = null;
+        cleanupForcedStyles();
+
+        if (!isUniversalDarkMode) {
+            document.body.style.background = "";
+            document.body.style.color = "";
         }
-
-        window.removeEventListener('load', forceDarkMode);
-
-        // Reset body style
-        document.body.style.background = "white";
-        document.body.style.color = "black";
     };
 
-    // ===== DOM MANIPULATION FUNCTIONS =====
     const fixWhiteElements = () => {
         if (!isUniversalDarkMode || !isTorrentFreak) return;
 
-        const allElements = document.querySelectorAll('*');
-        batchStyleChanges(allElements, (el) => {
-            // Skip media elements
+        const allElements = elementCache.getAllElements();
+        for (let i = 0; i < allElements.length; i++) {
+            const el = allElements[i];
+
             if (['IMG', 'IFRAME', 'EMBED', 'VIDEO', 'CANVAS', 'SVG', 'PATH'].includes(el.tagName)) {
-                return;
+                continue;
             }
 
             const computedStyle = window.getComputedStyle(el);
             const bgColor = computedStyle.backgroundColor;
             const textColor = computedStyle.color;
 
-            // Fix white or transparent backgrounds
             if (bgColor === 'rgba(0, 0, 0, 0)' ||
                 bgColor === 'rgb(255, 255, 255)' ||
                 bgColor === 'white' ||
@@ -749,7 +781,6 @@
                 el.style.setProperty('background-color', 'var(--tf-bg)', 'important');
             }
 
-            // Fix black text
             if (textColor === 'rgb(0, 0, 0)' ||
                 textColor === 'black' ||
                 textColor === '#000000' ||
@@ -757,7 +788,6 @@
                 el.style.setProperty('color', 'var(--tf-text)', 'important');
             }
 
-            // Special handling for elements that might be containers
             if (el.classList.contains('container') ||
                 el.classList.contains('wrapper') ||
                 el.classList.contains('content') ||
@@ -765,100 +795,213 @@
                 el.classList.contains('section')) {
                 el.style.setProperty('background-color', 'var(--tf-article-bg)', 'important');
             }
-        });
-    };
-
-    // ===== RACE CONDITION FREE LINK COLORING =====
-    const scheduleColorizeLinks = () => {
-        if (isColorizing) return;
-
-        if (colorizeFrameId) {
-            cancelAnimationFrame(colorizeFrameId);
         }
-
-        colorizeFrameId = requestAnimationFrame(() => {
-            isColorizing = true;
-            try {
-                colorizeLinks();
-            } finally {
-                isColorizing = false;
-                colorizeFrameId = null;
-            }
-        });
-    };
-
-    const scheduleFixWhiteElements = () => {
-        if (!isTorrentFreak || isFixingWhite) return;
-
-        if (fixWhiteFrameId) {
-            cancelAnimationFrame(fixWhiteFrameId);
-        }
-
-        fixWhiteFrameId = requestAnimationFrame(() => {
-            isFixingWhite = true;
-            try {
-                fixWhiteElements();
-            } finally {
-                isFixingWhite = false;
-                fixWhiteFrameId = null;
-            }
-        });
     };
 
     const colorizeLinks = () => {
         if (!isUniversalDarkMode) return;
 
-        const links = document.querySelectorAll('a[href]:not([data-dm-colored])');
-        batchStyleChanges(links, (a) => {
-            // Skip links that should not be colorized
+        const links = elementCache.getLinks();
+        const uncoloredLinks = Array.from(links).filter(a => !a.hasAttribute('data-dm-colored'));
+
+        for (let i = 0; i < uncoloredLinks.length; i++) {
+            const a = uncoloredLinks[i];
+
             if (a.closest('[data-no-dark-mode]') || a.classList.contains('no-dark-mode')) {
-                return;
+                continue;
             }
 
             const color = generateReadableRandomColor();
             a.style.setProperty('color', color, 'important');
             a.setAttribute('data-dm-colored', 'true');
-        });
+        }
     };
 
     const resetLinks = () => {
-        document.querySelectorAll('a[href][data-dm-colored]').forEach(a => {
+        const links = elementCache.getLinks();
+        const coloredLinks = Array.from(links).filter(a => a.hasAttribute('data-dm-colored'));
+
+        for (let i = 0; i < coloredLinks.length; i++) {
+            const a = coloredLinks[i];
             a.style.removeProperty('color');
             a.removeAttribute('data-dm-colored');
-        });
-    };
-
-    // ===== OBSERVER MANAGEMENT =====
-    const addObserver = (target, config, callback) => {
-        const observer = new MutationObserver(callback);
-        observer.observe(target, config);
-        observers.push(observer);
-        return observer;
-    };
-
-    const disconnectObservers = () => {
-        observers.forEach(o => o.disconnect());
-        observers = [];
-
-        if (dynamicContentObserver) {
-            dynamicContentObserver.disconnect();
-            dynamicContentObserver = null;
-        }
-
-        if (colorizeFrameId) {
-            cancelAnimationFrame(colorizeFrameId);
-            colorizeFrameId = null;
-        }
-
-        if (fixWhiteFrameId) {
-            cancelAnimationFrame(fixWhiteFrameId);
-            fixWhiteFrameId = null;
         }
     };
 
-    // ===== CORE FUNCTIONS =====
+    const processNewLinks = (mutations) => {
+        if (!isUniversalDarkMode) return;
+
+        const newLinks = [];
+
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+                if (node.matches && node.matches('a[href]')) {
+                    newLinks.push(node);
+                }
+
+                if (node.querySelectorAll) {
+                    const links = node.querySelectorAll('a[href]');
+                    for (let i = 0; i < links.length; i++) {
+                        newLinks.push(links[i]);
+                    }
+                }
+            }
+        }
+
+        for (let i = 0; i < newLinks.length; i++) {
+            const a = newLinks[i];
+            if (
+                !a.hasAttribute('data-dm-colored') &&
+                !a.closest('[data-no-dark-mode]') &&
+                !a.classList.contains('no-dark-mode')
+            ) {
+                const color = generateReadableRandomColor();
+                a.style.setProperty('color', color, 'important');
+                a.setAttribute('data-dm-colored', 'true');
+            }
+        }
+    };
+
+    const observerConfig = {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+    };
+
+    const debouncedMainObserverCallback = () => {
+        clearTimeout(observerDebounceTimer);
+        observerDebounceTimer = setTimeout(() => {
+            elementCache.invalidateAllElements();
+            fixWhiteElements();
+        }, 120);
+    };
+
+    const activateObservers = () => {
+        if (observersActive) return;
+
+        const body = elementCache.getBody();
+        if (!body) return;
+
+        if (isWordPress && isWordPressDarkMode) {
+            if (!wordpressObserver) {
+                wordpressObserver = new MutationObserver(() => {
+                    elementCache.invalidateWpContentElements();
+                    forceDarkMode();
+                });
+            }
+            wordpressObserver.observe(body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['style', 'class']
+            });
+        }
+
+        if (!isWordPress && isUniversalDarkMode) {
+            if (!mainObserver) {
+                mainObserver = new MutationObserver(debouncedMainObserverCallback);
+            }
+            mainObserver.observe(body, observerConfig);
+
+            if (!linkObserver) {
+                linkObserver = new MutationObserver(processNewLinks);
+            }
+            linkObserver.observe(body, {
+                childList: true,
+                subtree: true
+            });
+        }
+
+        observersActive = true;
+    };
+
+    const deactivateObservers = () => {
+        if (!observersActive) return;
+
+        if (mainObserver) mainObserver.disconnect();
+        if (wordpressObserver) wordpressObserver.disconnect();
+        if (linkObserver) linkObserver.disconnect();
+
+        clearTimeout(observerDebounceTimer);
+        observerDebounceTimer = null;
+        observersActive = false;
+    };
+
+    const handlePageShow = () => {
+        activateObservers();
+    };
+
+    const handlePageHide = () => {
+        deactivateObservers();
+    };
+
+    const handleStorageChange = (e) => {
+        if (e.key === STORAGE_KEY || e.key === WORDPRESS_STORAGE_KEY) {
+            isUniversalDarkMode = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'true');
+            isWordPressDarkMode = JSON.parse(localStorage.getItem(WORDPRESS_STORAGE_KEY) ?? 'false');
+            refresh();
+        }
+    };
+
+    const cleanupEventListeners = () => {
+        deactivateObservers();
+        window.removeEventListener('pageshow', handlePageShow);
+        window.removeEventListener('pagehide', handlePageHide);
+        window.removeEventListener('beforeunload', handlePageHide);
+        window.removeEventListener('storage', handleStorageChange);
+        document.removeEventListener('visibilitychange', handleVisibilityChangeFallback);
+        linkObserver = null;
+    };
+
+    const handleVisibilityChangeFallback = () => {
+        if (document.hidden) {
+            handlePageHide();
+        } else {
+            handlePageShow();
+        }
+    };
+
+    const refresh = () => {
+        if (isWordPress) {
+            if (isWordPressDarkMode) {
+                applyWordPressDarkMode();
+            } else {
+                removeWordPressDarkMode();
+            }
+        } else {
+            if (isUniversalDarkMode) {
+                applyUniversalStyle();
+                colorizeLinks();
+            } else {
+                removeUniversalStyle();
+            }
+        }
+
+        fixWhiteElements();
+    };
+
+    const toggleUniversalDarkMode = (reload = true) => {
+        isUniversalDarkMode = !isUniversalDarkMode;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(isUniversalDarkMode));
+        elementCache.invalidate();
+        if (reload) {
+            location.reload();
+        } else {
+            refresh();
+        }
+    };
+
+    const toggleWordPressDarkMode = () => {
+        isWordPressDarkMode = !isWordPressDarkMode;
+        localStorage.setItem(WORDPRESS_STORAGE_KEY, JSON.stringify(isWordPressDarkMode));
+        elementCache.invalidateWpContentElements();
+        refresh();
+    };
+
     const applyUniversalStyle = () => {
-        // Don't apply universal style on WordPress pages
         if (isWordPress) return;
 
         if (!universalStyleElement && isUniversalDarkMode) {
@@ -867,21 +1010,7 @@
             universalStyleElement.textContent = generateUniversalModeCSS();
             (document.head || document.documentElement).appendChild(universalStyleElement);
 
-            // Set up a single observer for all dynamic content changes
-            dynamicContentObserver = new MutationObserver(() => {
-                scheduleColorizeLinks();
-                scheduleFixWhiteElements();
-            });
-
-            // Observe the entire body for changes
-            if (document.body) {
-                dynamicContentObserver.observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    attributeFilter: ['style', 'class']
-                });
-            }
+            activateObservers();
         }
     };
 
@@ -890,93 +1019,40 @@
             universalStyleElement.remove();
             universalStyleElement = null;
         }
-        disconnectObservers();
+        deactivateObservers();
+        elementCache.invalidate();
         resetLinks();
     };
 
-    const debouncedRefresh = () => {
-        if (refreshTimeout) {
-            cancelAnimationFrame(refreshTimeout);
-        }
-        refreshTimeout = requestAnimationFrame(refresh);
-    };
-
-    const refresh = () => {
-        // Handle WordPress dark mode first if on WordPress page
-        if (isWordPress) {
-            if (isWordPressDarkMode) {
-                applyWordPressDarkMode();
-            } else {
-                removeWordPressDarkMode();
-            }
-        } else {
-            // Not on WordPress page, apply universal mode normally
-            if (isUniversalDarkMode) {
-                applyUniversalStyle();
-            } else {
-                removeUniversalStyle();
-            }
-        }
-
-        // Schedule coloring operations
-        scheduleColorizeLinks();
-        scheduleFixWhiteElements();
-    };
-
-    const toggleUniversalDarkMode = (reload = true) => {
-        isUniversalDarkMode = !isUniversalDarkMode;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(isUniversalDarkMode));
-        reload ? location.reload() : debouncedRefresh();
-    };
-
-    const toggleWordPressDarkMode = () => {
-        isWordPressDarkMode = !isWordPressDarkMode;
-        localStorage.setItem(WORDPRESS_STORAGE_KEY, JSON.stringify(isWordPressDarkMode));
-        debouncedRefresh();
-    };
-
-    // ===== EVENT HANDLERS =====
-    const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible') {
-            debouncedRefresh();
-        }
-    };
-
-    const cleanupEventListeners = () => {
-        disconnectObservers();
-        window.removeEventListener('pageshow', debouncedRefresh);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        window.removeEventListener('unload', cleanupEventListeners);
-    };
-
-    // ===== INITIALIZATION =====
     const init = () => {
         refresh();
 
-        // Register menu commands based on current page
         if (isWordPress) {
             GM_registerMenuCommand("WordPress Dark Mode", toggleWordPressDarkMode);
         } else {
             GM_registerMenuCommand("Universal Dark Mode", () => toggleUniversalDarkMode(false));
         }
 
-        document.addEventListener('visibilitychange', handleVisibilityChange, { passive: true });
-        window.addEventListener('pageshow', debouncedRefresh, { passive: true });
+        window.addEventListener('pageshow', handlePageShow, { passive: true });
+        window.addEventListener('pagehide', handlePageHide, { passive: true });
+        window.addEventListener('beforeunload', handlePageHide, { passive: true });
+        window.addEventListener('storage', handleStorageChange, { passive: true });
+        document.addEventListener('visibilitychange', handleVisibilityChangeFallback, { passive: true });
         window.addEventListener('unload', cleanupEventListeners, { passive: true });
     };
 
-    // Start when DOM is ready
-    if (document.head && document.body) {
+    if (document.head && elementCache.getBody()) {
         init();
     } else {
-        addObserver(document.documentElement, {
-            childList: true,
-            subtree: true
-        }, () => {
-            if (document.head && document.body) {
-                disconnectObservers();
+        const initObserver = new MutationObserver(() => {
+            if (document.head && elementCache.getBody()) {
+                initObserver.disconnect();
                 init();
             }
+        });
+        initObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true
         });
     }
 })();
