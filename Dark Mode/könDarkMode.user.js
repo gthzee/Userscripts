@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          Kön Dark Mode
 // @namespace     https://github.com/gthzee/
-// @version       6.5.8
+// @version       7.9
 // @description   Universal dark mode
 // @author        gthzee
 // @match         *://*/*
@@ -18,7 +18,7 @@
         STORAGE_KEY: "udm_" + location.hostname,
         WORDPRESS_STORAGE_KEY: "wp_dm",
         VERSION_KEY: "udm_version",
-        CURRENT_VERSION: "6.5.8",
+        CURRENT_VERSION: "7.9",
 
         STYLE_ID: "udm_style",
         WORDPRESS_STYLE_ID: "wp_dm_style",
