@@ -1,4 +1,4 @@
-# 🌒 Universal Dark Mode (`universalDM.user.js`)
+# 🌒 Universal Dark Mode (`könDarkMode.user.js`)
 
 Applies a universal dark mode on **all websites** you visit, using a random dark background color (black, dark gray, or navy) and random link colors for a comfortable browsing experience at night.
 
@@ -19,7 +19,7 @@ Applies a universal dark mode on **all websites** you visit, using a random dark
 ## 🚀 Installation
 
 1. Install the [Violentmonkey](https://violentmonkey.github.io/) browser extension.
-2. [Download or copy the script source code](./universalDM.user.js).
+2. [Download or copy the script source code](./könDarkMode.user.js).
 3. In Violentmonkey, create a new userscript and paste the script code.
 4. Save and enable the script.
 
