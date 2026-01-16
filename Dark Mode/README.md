@@ -27,8 +27,8 @@ Applies a universal dark mode on **all websites** you visit, using a random dark
 
 - Dark mode activates automatically on page load.
 - Use the Violentmonkey menu (script commands) to toggle dark mode:
-  - **Dark Mode (Reload)**: toggles dark mode and reloads the page.
-  - **Dark Mode (Instant)**: toggles dark mode instantly without reloading.
+  - **Universal Dark Mode (Instant)**: toggles dark mode instantly without reloading.
+  - **Wordpress Dark Mode (Instant)**: toggles dark mode on wordpress editor without reloading.
 
 ## ⚠️ Disclaimer
 
