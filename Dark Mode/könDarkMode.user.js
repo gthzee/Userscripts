@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name          Kön Dark Mode
 // @namespace     https://github.com/gthzee/
-// @version       7.9
+// @version       8.8
 // @description   Universal dark mode
 // @author        gthzee
 // @match         *://*/*
@@ -13,12 +13,13 @@
 (function() {
     'use strict';
 
-    /* --- Configuration --- */
     const Config = {
-        STORAGE_KEY: "udm_" + location.hostname,
+        STORAGE_KEY_PREFIX: "udm_",
         WORDPRESS_STORAGE_KEY: "wp_dm",
         VERSION_KEY: "udm_version",
-        CURRENT_VERSION: "7.9",
+        CURRENT_VERSION: "8.8",
+
+        get STORAGE_KEY() { return this.STORAGE_KEY_PREFIX + location.hostname; },
 
         STYLE_ID: "udm_style",
         WORDPRESS_STYLE_ID: "wp_dm_style",
@@ -53,10 +54,23 @@
     };
 
     const Site = {
-        get isTorrentFreak() { return /torrentfreak\.com$/i.test(location.hostname); },
-        get isOldReddit() { return /old\.reddit\.com$/i.test(location.hostname) && /^\/r\//i.test(location.pathname); },
-        get isWordPress() { return /wp-admin\/post-new\.php$|wp-admin\/post\.php$/.test(location.pathname); },
-        get is4chan() { return /4chan\.org$|4channel\.org$/i.test(location.hostname); }
+        get isTorrentFreak() {
+            const host = location.hostname.toLowerCase();
+            return host.endsWith('torrentfreak.com');
+        },
+        get isOldReddit() {
+            const host = location.hostname.toLowerCase();
+            const path = location.pathname.toLowerCase();
+            return host.endsWith('old.reddit.com') && path.startsWith('/r/');
+        },
+        get isWordPress() {
+            const path = location.pathname;
+            return path.endsWith('/wp-admin/post-new.php') || path.endsWith('/wp-admin/post.php');
+        },
+        get is4chan() {
+            const host = location.hostname.toLowerCase();
+            return host.endsWith('4chan.org') || host.endsWith('4channel.org');
+        }
     };
 
     const State = {
@@ -105,25 +119,41 @@
         }
     };
 
+    class LimitedCache {
+        constructor(maxSize = 1000) {
+            this.maxSize = maxSize;
+            this.cache = new Map();
+        }
+        get(key) {
+            return this.cache.get(key);
+        }
+        set(key, value) {
+            if (this.cache.size >= this.maxSize) {
+                const firstKey = this.cache.keys().next().value;
+                this.cache.delete(firstKey);
+            }
+            this.cache.set(key, value);
+        }
+        clear() {
+            this.cache.clear();
+        }
+    }
+
     const ColorUtils = {
-        cache: new Map(),
+        cache: new LimitedCache(1000),
 
         getDerivedColor(hex, adjustment) {
             const parse = (str) => parseInt(hex.slice(str, str + 2), 16);
             const r = parse(1);
             const g = parse(3);
             const b = parse(5);
-
             const adjust = (color) => Math.max(0, Math.min(255, Math.round(color + (255 - color) * adjustment)));
-
             const toHex = (val) => adjust(val).toString(16).padStart(2, '0');
             return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
         },
 
         calculateBrightness(hex) {
-            if (hex.length === 3) {
-                hex = hex.split('').map(c => c + c).join('');
-            }
+            if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
             const r = parseInt(hex.substring(0, 2), 16);
             const g = parseInt(hex.substring(2, 4), 16);
             const b = parseInt(hex.substring(4, 6), 16);
@@ -131,41 +161,53 @@
         },
 
         getPersistentColor(str) {
-            if (this.cache.has(str)) {
-                return this.cache.get(str);
-            }
+            if (this.cache.get(str)) return this.cache.get(str);
 
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                hash = str.charCodeAt(i) + ((hash << 5) - hash);
-            }
+            // MurmurHash3 implementation
+            const murmurhash3 = (key, seed = 0) => {
+                let h1 = seed;
+                const len = key.length;
+                const c1 = 0xcc9e2d51;
+                const c2 = 0x1b873593;
 
-            hash = hash >>> 0;
+                for (let i = 0; i < len; i++) {
+                    let k1 = key.charCodeAt(i);
+                    k1 = Math.imul(k1, c1);
+                    k1 = (k1 << 15) | (k1 >>> 17);
+                    k1 = Math.imul(k1, c2);
 
-            const r = (hash >> 16) & 0xFF;
-            const g = (hash >> 8) & 0xFF;
-            const b = hash & 0xFF;
+                    h1 ^= k1;
+                    h1 = (h1 << 13) | (h1 >>> 19);
+                    h1 = Math.imul(h1, 5) + 0xe6546b64;
+                }
+
+                h1 ^= len;
+                h1 ^= h1 >>> 16;
+                h1 = Math.imul(h1, 0x85ebca6b);
+                h1 ^= h1 >>> 13;
+                h1 = Math.imul(h1, 0xc2b2ae35);
+                h1 ^= h1 >>> 16;
+
+                return h1 >>> 0;
+            };
+
+            const rHash = murmurhash3(str, 1);
+            const gHash = murmurhash3(str, 2);
+            const bHash = murmurhash3(str, 3);
+
+            let r = rHash & 0xFF;
+            let g = gHash & 0xFF;
+            let b = bHash & 0xFF;
 
             let brightness = (r * 299 + g * 587 + b * 114) / 1000;
             let factor = 1;
-
-            if (brightness < Config.LINK_MIN_BRIGHTNESS) {
-                 factor = Config.LINK_MIN_BRIGHTNESS / (brightness || 1);
-            } else if (brightness > Config.LINK_MAX_BRIGHTNESS) {
-                 factor = Config.LINK_MAX_BRIGHTNESS / brightness;
-            }
+            if (brightness < Config.LINK_MIN_BRIGHTNESS) factor = Config.LINK_MIN_BRIGHTNESS / (brightness || 1);
+            else if (brightness > Config.LINK_MAX_BRIGHTNESS) factor = Config.LINK_MAX_BRIGHTNESS / brightness;
 
             const scale = (c) => Math.min(255, Math.max(0, Math.round(c * factor)));
+            const result = `#${scale(r).toString(16).padStart(2, '0')}${scale(g).toString(16).padStart(2, '0')}${scale(b).toString(16).padStart(2, '0')}`;
 
-            const finalR = scale(r).toString(16).padStart(2, '0');
-            const finalG = scale(g).toString(16).padStart(2, '0');
-            const finalB = scale(b).toString(16).padStart(2, '0');
-
-            const result = `#${finalR}${finalG}${finalB}`;
-
-            // 6. Save to Cache
             this.cache.set(str, result);
-
             return result;
         }
     };
@@ -178,9 +220,15 @@
                 localStorage.setItem(Config.VERSION_KEY, Config.CURRENT_VERSION);
             }
         },
-
         fullWipe() {
-            localStorage.removeItem(Config.STORAGE_KEY);
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(Config.STORAGE_KEY_PREFIX)) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(key => localStorage.removeItem(key));
             localStorage.removeItem(Config.WORDPRESS_STORAGE_KEY);
         }
     };
@@ -193,15 +241,14 @@
             const styleIndex = Math.floor(Math.random() * Config.BACKGROUND_STYLES.length);
             const chosenStyle = Config.BACKGROUND_STYLES[styleIndex];
             State.colors.bg = chosenStyle.bg;
-
             const textIndex = Math.floor(Math.random() * chosenStyle.textColors.length);
             State.colors.text = chosenStyle.textColors[textIndex];
         }
 
-        State.colors.article = ColorUtils.getDerivedColor(State.colors.bg, 0.1);
-        State.colors.content = ColorUtils.getDerivedColor(State.colors.bg, 0.15);
-        State.colors.code = ColorUtils.getDerivedColor(State.colors.bg, 0.05);
-        State.colors.input = ColorUtils.getDerivedColor(State.colors.bg, 0.08);
+        State.colors.article = ColorUtils.getDerivedColor(State.colors.bg, 0.2);
+        State.colors.content = ColorUtils.getDerivedColor(State.colors.bg, 0.3);
+        State.colors.code = ColorUtils.getDerivedColor(State.colors.bg, 0.1);
+        State.colors.input = ColorUtils.getDerivedColor(State.colors.bg, 0.15);
     };
 
     const initializeState = () => {
@@ -239,12 +286,15 @@
 
     const processNewLinks = (mutations) => {
         if (!State.darkMode.universal) return;
+
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
                 if (node.nodeType !== Node.ELEMENT_NODE) continue;
-                if (node.nodeName === 'A' && node.hasAttribute('href')) colorizeSingleLink(node);
-                const links = node.getElementsByTagName('a');
-                for (let i = 0; i < links.length; i++) colorizeSingleLink(links[i]);
+                if (node.nodeName === 'A' && node.hasAttribute('href')) {
+                    colorizeSingleLink(node);
+                }
+                const links = node.querySelectorAll('a[href]');
+                links.forEach(link => colorizeSingleLink(link));
             }
         }
     };
@@ -281,54 +331,33 @@
                 --text-secondary: ${ColorUtils.getDerivedColor(colors.text, -0.3)};
                 --accent: #5b9dd9;
             }
-
-            /* Main Body Background */
             html, body, #wpwrap, #wpcontent, #wpbody, #wpbody-content, .wrap {
                 background: var(--bg-dark) !important;
                 color: var(--text-primary) !important;
             }
-
-            /* --- Sidebar & Top Bar (Independent Menu Box) --- */
-            #wpadminbar,
-            #adminmenuback,
-            #adminmenuwrap,
-            #adminmenu {
+            #wpadminbar, #adminmenuback, #adminmenuwrap, #adminmenu {
                 background: var(--bg-medium) !important;
                 color: var(--text-primary) !important;
                 border-right: 1px solid var(--bg-light) !important;
             }
-
-            /* Force consistency inside the menu (No exceptions) */
-            #adminmenu .menu-top,
-            #adminmenu li.menu-top,
-            #adminmenu .wp-submenu,
-            #adminmenu .wp-submenu-wrap,
-            #adminmenu .wp-submenu-head,
-            #adminmenu li.wp-has-submenu,
-            #adminmenu a {
+            #adminmenu .menu-top, #adminmenu li.menu-top, #adminmenu .wp-submenu,
+            #adminmenu .wp-submenu-wrap, #adminmenu .wp-submenu-head,
+            #adminmenu li.wp-has-submenu, #adminmenu a {
                 background: var(--bg-medium) !important;
                 color: var(--text-primary) !important;
                 border-color: var(--bg-medium) !important;
             }
-
-            /* Hover/Active States for visual hierarchy */
-            #adminmenu .menu-top:hover,
-            #adminmenu .menu-top:focus,
-            #adminmenu li.opensub > a.menu-top,
-            #adminmenu li.current a.menu-top {
+            #adminmenu .menu-top:hover, #adminmenu .menu-top:focus,
+            #adminmenu li.opensub > a.menu-top, #adminmenu li.current a.menu-top {
                 background: var(--bg-light) !important;
                 color: #fff !important;
             }
-
-            /* Adminbar items */
             #wpadminbar .ab-item, #wpadminbar a {
                 color: var(--text-primary) !important;
             }
             #wpadminbar .ab-item:hover, #wpadminbar a:hover {
                 color: #fff !important;
             }
-
-            /* --- Editor & Content Areas --- */
             .wp-editor-container, #wp-content-wrap, .mce-container, .mce-panel, .mce-edit-area, .wp-editor-area,
             .editor-styles-wrapper, .block-editor-block-list__layout, .components-panel, .components-button,
             .block-editor-block-list__block, .block-editor-block-toolbar, .components-popover,
@@ -342,8 +371,6 @@
                 background: var(--bg-light) !important;
                 color: var(--text-primary) !important;
             }
-
-            /* --- Buttons & Inputs --- */
             .button, .button-secondary, #publish, .components-button {
                 background: var(--bg-light) !important;
                 color: var(--text-primary) !important;
@@ -358,14 +385,10 @@
                 border-color: var(--bg-medium) !important;
             }
             a, .components-button.is-link { color: var(--accent) !important; }
-
-            /* --- Images --- */
             img, video, iframe {
                 filter: invert(0.9) hue-rotate(180deg);
                 background: transparent !important;
             }
-
-            /* --- Tables & Meta Boxes --- */
             .edit-post-sidebar, .interface-interface-skeleton__sidebar,
             .edit-post-header, .interface-interface-skeleton__header,
             .postbox, .inside, .postbox-header, .handlediv {
@@ -397,8 +420,6 @@
             .attachments-browser .attachments, .attachment-preview {
                 background: var(--bg-light) !important;
             }
-
-            /* --- Generic Overwrites --- */
             [style*="background: white"], [style*="background-color: white"],
             [style*="background: #fff"], [style*="background-color: #fff"],
             [style*="background: rgb(255, 255, 255)"], [style*="background-color: rgb(255, 255, 255)"],
@@ -563,8 +584,6 @@
             }
             .expand, .tagline, .userattrs { background-color: transparent !important; }
             .collapsed, .score-hidden { background-color: ${colors.bg} !important; }
-
-            /* Nested Comments handling */
             .comment, .comment .child, .stickled.comment { background-color: ${colors.bg} !important; }
             .comment :is(.entry, .usertext, .usertext-body, .md),
             .stickied :is(.entry, .usertext-body, .usertext-edit, .md) {
@@ -579,7 +598,6 @@
                 background-color: ${colors.article} !important;
                 color: ${colors.text} !important;
             }
-            /* Specific overrides for complex selectors */
             .score-hidden.comment.noncollapsed.stickied[class*="id-t1_"].thing *,
             .score-hidden.comment.noncollapsed.stickied[class*="id-t1_"].thing * * {
                 background-color: inherit !important;
@@ -604,7 +622,6 @@
             .comment.noncollapsed[class*="id-t1_"].thing :is(.entry, .usertext-body, .usertext-edit, .md) {
                 background-color: ${colors.content} !important;
             }
-
             .userattrs a, .submitter, .moderator, .admin, .friend, .flair {
                 background-color: ${colors.content} !important;
                 color: ${colors.text} !important;
@@ -613,15 +630,23 @@
             img, video, iframe {
                 filter: brightness(0.9) contrast(1.1) !important;
             }
+            ::selection {
+                background: ${ColorUtils.getDerivedColor(colors.text, -0.2)} !important;
+                color: ${ColorUtils.getDerivedColor(colors.bg, -0.7)} !important;
+            }
         `;
     };
 
     const generateUniversalCSS = () => {
         const colors = State.colors;
 
-        const layoutAreas = `:is(header, nav, main, aside, footer, section, article, #header, #nav, #main, #aside, #footer, .header, .nav, .navbar, .main, .aside, .footer, .container, .wrapper, .site-header)`;
+        const layoutAreas = `:is(
+            header, nav, main, aside, footer, section, article, #header, #nav, #main, #aside,
+            #footer, .header, .nav, .navbar, .main, .aside, .footer, .container, .wrapper, .site-header)`;
 
-        const dropdownAreas = `:is(.dropdown, .dropdown-menu, .sub-menu, .submenu, .flyout, [role="menu"], [role="listbox"], [class*="dropdown"], [class*="submenu"])`;
+        const dropdownAreas = `:is(
+            .dropdown, .dropdown-menu, .sub-menu, .submenu, .flyout, [role="menu"], [role="listbox"],
+            [class*="dropdown"], [class*="submenu"])`;
 
         const advancedNavAreas = `:is(
             .nav__wrap, ul.nav__row, ul.nav__sub, div.nav__subitem, li.nav__subwrap, menu,
@@ -652,15 +677,20 @@
                 filter: brightness(0.9) contrast(1.1) !important;
             }
             svg, svg * {
-                fill: transparent !important;
                 stroke: ${colors.text} !important;
             }
+            svg[width="16"], svg[width="18"], svg[width="20"], svg[width="24"],
+            svg[height="16"], svg[height="18"], svg[height="20"], svg[height="24"],
+            .icon svg, svg.icon {
+                fill: currentColor !important;
+            }
+
             ${layoutAreas}, ${dropdownAreas}, ${advancedNavAreas} {
                 background-color: ${colors.bg} !important;
                 color: ${colors.text} !important;
             }
             ${dropdownAreas} {
-                z-index: 2147483647 !important;
+                z-index: 9999999 !important;
             }
             :is(${layoutAreas}, ${dropdownAreas}, ${advancedNavAreas}) a:hover {
                  filter: brightness(1.2) !important;
@@ -692,10 +722,10 @@
         if (isTf) {
             if (['IMG', 'IFRAME', 'EMBED', 'VIDEO', 'CANVAS', 'SVG', 'PATH'].includes(el.tagName)) return;
 
-            if (['rgba(0, 0, 0, 0)', 'rgb(255, 255, 255)', 'white', '#ffffff', '#fff'].includes(bgColor)) {
+            if (['rgba(0, 0, 0, 0)', 'rgb(255, 255, 255)'].includes(bgColor)) {
                 el.style.setProperty('background-color', 'var(--tf-bg)', 'important');
             }
-            if (['rgb(0, 0, 0)', 'black', '#000000', '#000'].includes(textColor)) {
+            if (['rgb(0, 0, 0)'].includes(textColor)) {
                 el.style.setProperty('color', 'var(--tf-text)', 'important');
             }
             if (el.classList.contains('container') || el.classList.contains('wrapper') ||
@@ -708,12 +738,11 @@
         if (isWp) {
             if (el.closest('#adminmenu') || el.closest('#wpadminbar')) return;
 
-            if (['rgb(255, 255, 255)', 'white', 'rgb(241, 241, 241)', '#f1f1f1',
-                 'rgb(250, 250, 250)', '#fafafa'].includes(bgColor)) {
+            if (['rgb(255, 255, 255)', 'rgb(241, 241, 241)', 'rgb(250, 250, 250)'].includes(bgColor)) {
                 el.style.setProperty('background-color', 'var(--bg-dark)', 'important');
                 el.setAttribute(Config.FORCE_DM_ATTR, 'true');
             }
-            if (['rgb(0, 0, 0)', 'black', '#000000', 'rgb(33, 33, 33)', '#212121'].includes(textColor)) {
+            if (['rgb(0, 0, 0)', 'rgb(33, 33, 33)'].includes(textColor)) {
                 el.style.setProperty('color', 'var(--text-primary)', 'important');
                 el.setAttribute(Config.FORCE_DM_ATTR, 'true');
             }
@@ -775,6 +804,17 @@
         }
     };
 
+    const removeDynamicContent = () => {
+        Observers.clear();
+        [Config.STYLE_ID, Config.WORDPRESS_STYLE_ID, Config.FOURCHAN_STYLE_ID].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        });
+        cleanupForcedStyles();
+        resetLinks();
+        Observers.isActive = false;
+    };
+
     const activateObservers = () => {
         if (Observers.isActive) return;
         const body = document.body;
@@ -785,16 +825,17 @@
             Observers.link.observe(document.documentElement, { childList: true, subtree: true });
         }
 
-        if (!Site.isWordPress && State.darkMode.universal) {
-            if (!Observers.main) {
-                Observers.main = new MutationObserver((mutations) => {
-                    for (const mutation of mutations) {
-                        for (const node of mutation.addedNodes) {
-                            if (node.nodeType === Node.ELEMENT_NODE) processSubtree(node);
-                        }
+        const needsDeepObserver = (Site.isWordPress && State.darkMode.wordpress) ||
+                                  (Site.isTorrentFreak && State.darkMode.universal);
+
+        if (needsDeepObserver && !Observers.main) {
+            Observers.main = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.nodeType === Node.ELEMENT_NODE) processSubtree(node);
                     }
-                });
-            }
+                }
+            });
             Observers.main.observe(body, { childList: true, subtree: true });
         }
 
@@ -908,7 +949,7 @@
     };
 
     const toggleUniversalDarkMode = (reload = true) => {
-        cleanup();
+        removeDynamicContent();
 
         State.darkMode.universal = !State.darkMode.universal;
         localStorage.setItem(Config.STORAGE_KEY, State.darkMode.universal ? 'true' : 'false');
@@ -923,7 +964,7 @@
         refresh();
     };
 
-    const handlePageShow = () => { activateObservers(); };
+    const handlePageShow = () => { refresh(); };
     const handlePageHide = () => { deactivateObservers(); };
 
     const handleStorageChange = (event) => {
@@ -941,15 +982,8 @@
     };
 
     const cleanup = () => {
-        Observers.clear();
-        [Config.STYLE_ID, Config.WORDPRESS_STYLE_ID, Config.FOURCHAN_STYLE_ID].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.remove();
-        });
-        cleanupForcedStyles();
-        resetLinks();
+        removeDynamicContent();
         EventManager.removeAll();
-        Observers.isActive = false;
     };
 
     const init = () => {
